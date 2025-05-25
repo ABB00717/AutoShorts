@@ -1,4 +1,7 @@
-import whisper
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+
+import faster_whisper as whisper
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 import os
 from tqdm import tqdm
@@ -27,16 +30,16 @@ def process_video_chunk(video_path, start_time, end_time, output_chunk_path):
         video.close()
         
         # Transcribe the chunk
-        model = whisper.load_model("base")
-        result = model.transcribe(temp_chunk_path, 
-                                prompt="Umm,let me think like,hmm... Okay,here's what I'm,like,thinking.",
+        model = whisper.WhisperModel("base", device="cuda", compute_type="float16")
+        segments, info = model.transcribe(temp_chunk_path, 
+                                initial_prompt="Umm,let me think like,hmm... Okay,here's what I'm,like,thinking.",
                                 word_timestamps=True)
         
         # Clean up temporary chunk file
         os.remove(temp_chunk_path)
         
         # Identify silence periods
-        silence_periods = identify_silence_periods(result, chunk_duration, threshold=0.5)
+        silence_periods = identify_silence_periods(segments, chunk_duration, threshold=0.5)
         
         # Adjust silence periods to account for chunk start time
         adjusted_silence_periods = [(start + start_time, end + start_time) for start, end in silence_periods]
@@ -56,7 +59,7 @@ def identify_silence_periods(transcription, video_duration, threshold=1.0, buffe
     Identifies silence periods in the transcription based on the threshold.
     
     Args:
-        transcription (dict): The transcription result with word-level timestamps.
+        transcription (iterable): The transcription result with word-level timestamps.
         threshold (float): The minimum duration of silence to be considered.
         video_duration (float): Duration of the video chunk.
     
@@ -64,17 +67,17 @@ def identify_silence_periods(transcription, video_duration, threshold=1.0, buffe
         list: A list of tuples where each tuple contains the start and end time of a silence period.
     """
     silence_periods = []
-    words = transcription['segments']
     previous_end = 0
 
-    for word in words:
-        start_time = word['start']
-        if start_time - previous_end > threshold:
-            # Ensure we don't exceed the chunk duration
-            end_time = min(start_time - buffer, video_duration)
-            if end_time > previous_end + buffer:
-                silence_periods.append((previous_end + buffer, end_time))
-        previous_end = word['end']
+    for segment in transcription:
+        for word in segment.words:
+            start_time = word.start
+            if start_time - previous_end > threshold:
+                # Ensure we don't exceed the chunk duration
+                end_time = min(start_time - buffer, video_duration)
+                if end_time > previous_end + buffer:
+                    silence_periods.append((previous_end + buffer, end_time))
+            previous_end = word.end
 
     # Handle the final silence period
     if video_duration - previous_end > threshold:
@@ -165,6 +168,13 @@ def process_long_video(input_video, output_video, chunk_duration=300):
             continue
             
         chunk_output = os.path.join(temp_dir, f"chunk_{i}.mp4")
+        
+        # Check if chunk already exists
+        if os.path.exists(chunk_output):
+            print(f"Chunk {i} already processed. Skipping.")
+            processed_chunks.append(chunk_output)
+            continue  # Skip processing this chunk
+            
         if process_video_chunk(input_video, start_time, end_time, chunk_output):
             processed_chunks.append(chunk_output)
     
@@ -206,8 +216,8 @@ def process_long_video(input_video, output_video, chunk_duration=300):
         print("No chunks were successfully processed.")
 
 if __name__ == "__main__":
-    video_path = "input_video.mp4"       # Path to your video file
-    output_path = "output_video.mp4"    # Path to save the edited video
+    video_path = "D:\\DavinciProjects\\鮑興國演算法系列\\Lecture 22_ Elementary Graph Algorithms - I_1\\Lecture 22_ Elementary Graph Algorithms - I_1.mp4"       # Path to your video file
+    output_path = "D:\\DavinciProjects\\鮑興國演算法系列\\Lecture 22_ Elementary Graph Algorithms - I_1\\Lecture 22_ Elementary Graph Algorithms - I_1_edited.mp4"    # Path to save the edited video
     
     # Process the video in chunks
     process_long_video(video_path, output_path)
